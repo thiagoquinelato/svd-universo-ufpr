@@ -6,14 +6,15 @@ from typing import Optional
 import cv2
 import os
 import logging
+import numpy as np
 
 import matplotlib.pyplot as plt
 
-from settings.settings import PATHS, CAMERA, FACE_DETECTION
+from settings.settings import PATHS, CAMERA, FACE_DETECTION, EYE_DETECTION
 
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def get_image_dir():
@@ -21,6 +22,66 @@ def get_image_dir():
 
 def get_face_cascade_path():
     return os.path.join(os.getcwd(), PATHS['face_cascade_file'])
+
+face_cascade = None
+def get_face_cascade():
+    global face_cascade
+    if face_cascade is None:
+        face_cascade_path = get_face_cascade_path()
+        if not os.path.exists(face_cascade_path):
+            logger.error(f"Face cascade file not found: {face_cascade_path}")
+            raise FileNotFoundError(f"Face cascade file not found: {face_cascade_path}")
+        face_cascade = cv2.CascadeClassifier(face_cascade_path)
+        if face_cascade.empty():
+            logger.error("Error loading cascade classifier")
+            raise ValueError("Error loading cascade classifier")
+    return face_cascade
+
+def get_eye_cascade_path():
+    return os.path.join(os.getcwd(), PATHS['eye_cascade_file'])
+
+eye_cascade = None
+def get_eye_cascade():
+    global eye_cascade
+    if eye_cascade is None:
+        eye_cascade_path = get_eye_cascade_path()
+        if not os.path.exists(eye_cascade_path):
+            logger.error(f"Eye cascade file not found: {eye_cascade_path}")
+            raise FileNotFoundError(f"Eye cascade file not found: {eye_cascade_path}")
+        eye_cascade = cv2.CascadeClassifier(eye_cascade_path)
+        if eye_cascade.empty():
+            logger.error("Error loading eye cascade classifier")
+            raise ValueError("Error loading eye cascade classifier")
+    return eye_cascade
+
+left_eye_cascade = None
+def get_left_eye_cascade():
+    global left_eye_cascade
+    if left_eye_cascade is None:
+        left_eye_cascade_path = os.path.join(os.getcwd(), PATHS['left_eye_cascade_file'])
+        if not os.path.exists(left_eye_cascade_path):
+            logger.error(f"Left eye cascade file not found: {left_eye_cascade_path}")
+            raise FileNotFoundError(f"Left eye cascade file not found: {left_eye_cascade_path}")
+        left_eye_cascade = cv2.CascadeClassifier(left_eye_cascade_path)
+        if left_eye_cascade.empty():
+            logger.error("Error loading left eye cascade classifier")
+            raise ValueError("Error loading left eye cascade classifier")
+    return left_eye_cascade
+
+right_eye_cascade = None
+def get_right_eye_cascade():
+    global right_eye_cascade
+    if right_eye_cascade is None:
+        right_eye_cascade_path = os.path.join(os.getcwd(), PATHS['right_eye_cascade_file'])
+        if not os.path.exists(right_eye_cascade_path):
+            logger.error(f"Right eye cascade file not found: {right_eye_cascade_path}")
+            raise FileNotFoundError(f"Right eye cascade file not found: {right_eye_cascade_path}")
+        right_eye_cascade = cv2.CascadeClassifier(right_eye_cascade_path)
+        if right_eye_cascade.empty():
+            logger.error("Error loading right eye cascade classifier")
+            raise ValueError("Error loading right eye cascade classifier")
+    return right_eye_cascade
+
 
 def get_camera_index():
     return CAMERA['index']
@@ -55,13 +116,8 @@ def initialize_camera(camera_index: int = 0) -> Optional[cv2.VideoCapture]:
     except Exception as e:
         logger.error(f"Error initializing camera: {e}")
         return None
-    
-def camera_loop():
-    ret, frame = cam.read()
-    if not ret:
-        logger.warning("Failed to grab frame")
-        # repetir a tentativa de captura
 
+def detect_face_and_eyes(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     faces = face_cascade.detectMultiScale(
         gray,
@@ -70,19 +126,77 @@ def camera_loop():
         minSize=FACE_DETECTION['min_size']
     )
     
-    for (x, y, w, h) in faces:
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
-        
-        face_img = frame[y:y+h, x:x+w]
-        face_img_gray = gray[y:y+h, x:x+w]
+    for (face_x, face_y, face_w, face_h) in faces:
+        if FACE_DETECTION['apply_highlight']:
+            cv2.rectangle(frame, (face_x, face_y), (face_x+face_w, face_y+face_h), FACE_DETECTION['highlight_color'], 2)
+
+        face_img = frame[face_y:face_y+face_h, face_x:face_x+face_w]
+        face_img_gray = gray[face_y:face_y+face_h, face_x:face_x+face_w]
+
+        left_eye_cascade = get_left_eye_cascade()
+        left_eyes = left_eye_cascade.detectMultiScale(face_img_gray, scaleFactor=EYE_DETECTION['scale_factor'], minNeighbors=EYE_DETECTION['min_neighbors'], minSize=EYE_DETECTION['min_size'])
+        right_eye_cascade = get_right_eye_cascade()
+        right_eyes = right_eye_cascade.detectMultiScale(face_img_gray, scaleFactor=EYE_DETECTION['scale_factor'], minNeighbors=EYE_DETECTION['min_neighbors'], minSize=EYE_DETECTION['min_size'])
+        if len(left_eyes) == 0:
+            eyes = right_eyes
+        elif len(right_eyes) == 0:
+            eyes = left_eyes
+        else:
+            eyes = np.concatenate([left_eyes, right_eyes])        
+        if len(eyes) < 2:
+            continue
+
+        eyes = sorted(eyes, key=lambda x: x[0])
+        eyes = [eyes[0], eyes[-1]]
+        rotation_center = [0, 0]
+        for (eye_x, eye_y, eye_w, eye_h) in eyes:  
+            eye_center = (eye_x + eye_w // 2, eye_y + eye_h // 2)
+            rotation_center = (rotation_center[0] + eye_center[0], rotation_center[1] + eye_center[1])
+            if EYE_DETECTION['apply_highlight']:
+                cv2.circle(face_img, eye_center, 5, EYE_DETECTION['highlight_color'], -1)
+        rotation_center = (int(face_x + rotation_center[0] // 2), int(face_y + rotation_center[1] // 2))
+        logger.info(f"rotation center (global coordinates): {rotation_center}")
+        dx = eyes[1][0] - eyes[0][0]
+        dy = eyes[1][1] - eyes[0][1]
+        angle = np.degrees(np.arctan2(dy, dx))
+        logger.info(f"rotation angle: {angle:.2f} degrees")
+        M = cv2.getRotationMatrix2D(center=rotation_center, angle=angle, scale=1)
+        logger.info(f"Rotation matrix: {M}")
+        frame = cv2.warpAffine(frame, M, (frame.shape[1], frame.shape[0]))
+        gray = cv2.warpAffine(gray, M, (gray.shape[1], gray.shape[0]))
+        face_img = frame[face_y:face_y+face_h, face_x:face_x+face_w]
+        face_img_gray = gray[face_y:face_y+face_h, face_x:face_x+face_w]
+    
+        return frame, gray, face_img, face_img_gray
+    
+    return None, None, None, None
+     
+
+def camera_loop():
+    ret, frame = cam.read()
+    if not ret:
+        logger.warning("Failed to grab frame")
+        # repetir a tentativa de captura
+
+    opencv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
+
+    frame, gray, face_img, face_img_gray = detect_face_and_eyes(frame)
+
+    if frame is not None:
         img_path = f'./{PATHS["image_dir"]}/img.jpg'
         cv2.imwrite(img_path, frame)
-        img_path = f'./{PATHS["image_dir"]}/face_img_gray.jpg'
-        cv2.imwrite(img_path, face_img_gray)
+
+    if gray is not None:
+        img_path = f'./{PATHS["image_dir"]}/img_gray.jpg'
+        cv2.imwrite(img_path, gray)
+
+    if face_img is not None:
         img_path = f'./{PATHS["image_dir"]}/face_img.jpg'
         cv2.imwrite(img_path, face_img)
 
-    opencv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
+    if face_img_gray is not None:
+        img_path = f'./{PATHS["image_dir"]}/face_img_gray.jpg'
+        cv2.imwrite(img_path, face_img_gray)
 
     captured_image = Image.fromarray(opencv_image)
 
@@ -95,7 +209,7 @@ if __name__ == '__main__':
     try:
         # Initialize
         create_directory(get_image_dir())
-        face_cascade = cv2.CascadeClassifier(get_face_cascade_path())
+        face_cascade = get_face_cascade()
         if face_cascade.empty():
             raise ValueError("Error loading cascade classifier")
             
