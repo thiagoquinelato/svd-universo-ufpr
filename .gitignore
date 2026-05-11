@@ -1,4 +1,4 @@
-# dataset and results directories
+# eigenface's dataset and results directories
 eigenfaces/datasets/
 eigenfaces/results/
 

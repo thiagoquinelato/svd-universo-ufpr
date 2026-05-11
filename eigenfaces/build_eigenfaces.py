@@ -141,6 +141,22 @@ plt.tight_layout(pad=0)
 plt.savefig(mean_face_path, bbox_inches="tight", pad_inches=0)
 plt.close()
 
+u_dir = OUTPUT_DIR / "U"
+u_dir.mkdir(parents=True, exist_ok=True)
+
+image_shape = filtered_images[0][2].shape
+
+for index in range(min(5, U.shape[1])):
+    u_image = U[:, index].reshape(image_shape)
+    u_path = u_dir / f"U_{index + 1}.png"
+
+    plt.figure(figsize=(6, 6))
+    plt.imshow(u_image, cmap="gray")
+    plt.axis("off")
+    plt.tight_layout(pad=0)
+    plt.savefig(u_path, bbox_inches="tight", pad_inches=0)
+    plt.close()
+
 print(f"Matriz X salva em: {OUTPUT_DIR / 'X.npy'}")
 print(f"Shape de X: {X.shape}")
 print(f"Face média X_bar salva em: {OUTPUT_DIR / 'X_bar.npy'}")
