@@ -3,3 +3,5 @@ opencv-contrib-python
 pyyaml
 pillow
 matplotlib
+numpy
+kagglehub
