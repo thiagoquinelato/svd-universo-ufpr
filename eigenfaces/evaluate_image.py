@@ -61,6 +61,6 @@ best = ranked[0]
 print(f"Predição principal: {best['celebrity']}")
 print(f"Imagem de referência mais próxima: {best['path']}")
 print(f"Distância: {best['distance']:.4f}")
-print("Top 3:")
-for item in ranked[:3]:
+print("Top 5:")
+for item in ranked[:5]:
     print(f"- {item['celebrity']} | distância={item['distance']:.4f} | relative={item['relative_path']} | path={item['path']}")
