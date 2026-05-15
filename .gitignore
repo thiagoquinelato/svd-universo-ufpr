@@ -1,3 +1,7 @@
+# eigenface's dataset and results directories
+eigenfaces/datasets/
+eigenfaces/results/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
