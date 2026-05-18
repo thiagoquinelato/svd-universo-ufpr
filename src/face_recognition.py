@@ -1,4 +1,6 @@
-from tkinter import *
+import tkinter as tk
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
 from PIL import Image, ImageTk
 
 from typing import Optional
@@ -119,99 +121,164 @@ def initialize_camera(camera_index: int = 0) -> Optional[cv2.VideoCapture]:
 
 def detect_face_and_eyes(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(
+    faces = get_face_cascade().detectMultiScale(
         gray,
         scaleFactor=FACE_DETECTION['scale_factor'],
         minNeighbors=FACE_DETECTION['min_neighbors'],
         minSize=FACE_DETECTION['min_size']
     )
+
+    # keep only the largest face detected
+    if len(faces) == 0:
+        return None, None, None, None
+    faces = sorted(faces, key=lambda x: x[2]*x[3], reverse=True)
+    face_x, face_y, face_w, face_h = faces[0]
     
-    for (face_x, face_y, face_w, face_h) in faces:
-        if FACE_DETECTION['apply_highlight']:
-            cv2.rectangle(frame, (face_x, face_y), (face_x+face_w, face_y+face_h), FACE_DETECTION['highlight_color'], 2)
+    if FACE_DETECTION['apply_highlight']:
+        cv2.rectangle(frame, (face_x, face_y), (face_x+face_w, face_y+face_h), FACE_DETECTION['highlight_color'], 2)
 
-        face_img = frame[face_y:face_y+face_h, face_x:face_x+face_w]
-        face_img_gray = gray[face_y:face_y+face_h, face_x:face_x+face_w]
+    face_img = frame[face_y:face_y+face_h, face_x:face_x+face_w]
+    face_img_gray = gray[face_y:face_y+face_h, face_x:face_x+face_w]
 
-        left_eye_cascade = get_left_eye_cascade()
-        left_eyes = left_eye_cascade.detectMultiScale(face_img_gray, scaleFactor=EYE_DETECTION['scale_factor'], minNeighbors=EYE_DETECTION['min_neighbors'], minSize=EYE_DETECTION['min_size'])
-        right_eye_cascade = get_right_eye_cascade()
-        right_eyes = right_eye_cascade.detectMultiScale(face_img_gray, scaleFactor=EYE_DETECTION['scale_factor'], minNeighbors=EYE_DETECTION['min_neighbors'], minSize=EYE_DETECTION['min_size'])
-        if len(left_eyes) == 0:
-            eyes = right_eyes
-        elif len(right_eyes) == 0:
-            eyes = left_eyes
-        else:
-            eyes = np.concatenate([left_eyes, right_eyes])        
-        if len(eyes) < 2:
-            continue
+    left_eye_cascade = get_left_eye_cascade()
+    left_eyes = left_eye_cascade.detectMultiScale(face_img_gray, scaleFactor=EYE_DETECTION['scale_factor'], minNeighbors=EYE_DETECTION['min_neighbors'], minSize=EYE_DETECTION['min_size'])
+    right_eye_cascade = get_right_eye_cascade()
+    right_eyes = right_eye_cascade.detectMultiScale(face_img_gray, scaleFactor=EYE_DETECTION['scale_factor'], minNeighbors=EYE_DETECTION['min_neighbors'], minSize=EYE_DETECTION['min_size'])
+    if len(left_eyes) == 0:
+        eyes = right_eyes
+    elif len(right_eyes) == 0:
+        eyes = left_eyes
+    else:
+        eyes = np.concatenate([left_eyes, right_eyes])        
+    if len(eyes) < 2:
+        return None, None, None, None
 
-        eyes = sorted(eyes, key=lambda x: x[0])
-        eyes = [eyes[0], eyes[-1]]
-        rotation_center = [0, 0]
-        for (eye_x, eye_y, eye_w, eye_h) in eyes:  
-            eye_center = (eye_x + eye_w // 2, eye_y + eye_h // 2)
-            rotation_center = (rotation_center[0] + eye_center[0], rotation_center[1] + eye_center[1])
-            if EYE_DETECTION['apply_highlight']:
-                cv2.circle(face_img, eye_center, 5, EYE_DETECTION['highlight_color'], -1)
-        rotation_center = (int(face_x + rotation_center[0] // 2), int(face_y + rotation_center[1] // 2))
-        logger.info(f"rotation center (global coordinates): {rotation_center}")
-        dx = eyes[1][0] - eyes[0][0]
-        dy = eyes[1][1] - eyes[0][1]
-        angle = np.degrees(np.arctan2(dy, dx))
-        logger.info(f"rotation angle: {angle:.2f} degrees")
-        M = cv2.getRotationMatrix2D(center=rotation_center, angle=angle, scale=1)
-        logger.info(f"Rotation matrix: {M}")
-        frame = cv2.warpAffine(frame, M, (frame.shape[1], frame.shape[0]))
-        gray = cv2.warpAffine(gray, M, (gray.shape[1], gray.shape[0]))
-        face_img = frame[face_y:face_y+face_h, face_x:face_x+face_w]
-        face_img_gray = gray[face_y:face_y+face_h, face_x:face_x+face_w]
-    
-        return frame, gray, face_img, face_img_gray
-    
-    return None, None, None, None
-     
+    eyes = sorted(eyes, key=lambda x: x[0])
+    eyes = [eyes[0], eyes[-1]]
+    rotation_center = [0, 0]
+    for (eye_x, eye_y, eye_w, eye_h) in eyes:  
+        eye_center = (eye_x + eye_w // 2, eye_y + eye_h // 2)
+        rotation_center = (rotation_center[0] + eye_center[0], rotation_center[1] + eye_center[1])
+        if EYE_DETECTION['apply_highlight']:
+            cv2.circle(face_img, eye_center, 5, EYE_DETECTION['highlight_color'], -1)
+    rotation_center = (int(face_x + rotation_center[0] // 2), int(face_y + rotation_center[1] // 2))
+    logger.info(f"rotation center (global coordinates): {rotation_center}")
+    dx = eyes[1][0] - eyes[0][0]
+    dy = eyes[1][1] - eyes[0][1]
+    angle = np.degrees(np.arctan2(dy, dx))
+    logger.info(f"rotation angle: {angle:.2f} degrees")
+    M = cv2.getRotationMatrix2D(center=rotation_center, angle=angle, scale=1)
+    logger.info(f"Rotation matrix: {M}")
+    frame = cv2.warpAffine(frame, M, (frame.shape[1], frame.shape[0]))
+    gray = cv2.warpAffine(gray, M, (gray.shape[1], gray.shape[0]))
+    face_img = frame[face_y:face_y+face_h, face_x:face_x+face_w]
+    face_img_gray = gray[face_y:face_y+face_h, face_x:face_x+face_w]
 
+    return frame, gray, face_img, face_img_gray
+
+capturing = False
+capturedFrame = None
+
+def detect():
+    global capturedFrame
+    frame = capturedFrame.copy() 
+    capturedFrame = None
+
+    frame, gray, face_img, face_img_gray = detect_face_and_eyes(frame)
+
+    global captureStep
+    if frame is None:
+        captureStep = 6
+    else: 
+        captureStep = 7
+
+    # if frame is not None:
+    #     img_path = f'./{PATHS["image_dir"]}/img.jpg'
+    #     cv2.imwrite(img_path, frame)
+
+    # if gray is not None:
+    #     img_path = f'./{PATHS["image_dir"]}/img_gray.jpg'
+    #     cv2.imwrite(img_path, gray)
+
+    # if face_img is not None:
+    #     img_path = f'./{PATHS["image_dir"]}/face_img.jpg'
+    #     cv2.imwrite(img_path, face_img)
+
+    if face_img_gray is not None:
+        img_path = f'./{PATHS["image_dir"]}/face_img_gray.jpg'
+        cv2.imwrite(img_path, face_img_gray)
+
+
+def capture():
+    global capturing, captureStep
+    capturing = True
+    captureStep = 0
+    btnCapturar.config(state=DISABLED)
+    root.after(1000, increase_capture_step)
+    root.after(2000, increase_capture_step)
+    root.after(3000, increase_capture_step)
+    root.after(3500, increase_capture_step)
+
+
+def increase_capture_step():
+    global captureStep
+    captureStep += 1
+
+captureStep = 0
 def camera_loop():
     ret, frame = cam.read()
     if not ret:
         logger.warning("Failed to grab frame")
         # repetir a tentativa de captura
 
-    opencv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
+    global capturing
+    if capturing:
 
-    frame, gray, face_img, face_img_gray = detect_face_and_eyes(frame)
+        text = ""
+        global captureStep
+        if captureStep == 0:
+            text = "3"
+        elif captureStep == 1:
+            text = "2"
+        elif captureStep == 2:
+            text = "1"
+        elif captureStep == 3:
+            text = "Capturando..."
+        elif captureStep == 4:
+            global capturedFrame
+            capturedFrame = frame.copy()
+            btnCapturar.after(10, detect)
+            captureStep += 1
+            text = "Aguarde..."
+        elif captureStep == 5:
+            text = "Aguarde..."
+        elif captureStep == 6:
+            text = "Tente novamente."
+            btnCapturar.config(state=NORMAL)
+        elif captureStep == 7:
+            capturing = False
+            captureStep = 0
+            btnCapturar.config(state=NORMAL)
 
-    if frame is not None:
-        img_path = f'./{PATHS["image_dir"]}/img.jpg'
-        cv2.imwrite(img_path, frame)
+        if captureStep < 7:
+            # Define text properties
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 2
+            color = (200, 200, 200)  # BGR format 
+            thickness = 3
+            text_width, text_height = cv2.getTextSize(text, font, font_scale, thickness)[0]
+            top_center_coordinates = (int(frame.shape[1] / 2) - int(text_width / 2), 2*text_height)
+            cv2.putText(frame, text, top_center_coordinates, font, font_scale, color, thickness, cv2.LINE_AA)
 
-    if gray is not None:
-        img_path = f'./{PATHS["image_dir"]}/img_gray.jpg'
-        cv2.imwrite(img_path, gray)
-
-    if face_img is not None:
-        img_path = f'./{PATHS["image_dir"]}/face_img.jpg'
-        cv2.imwrite(img_path, face_img)
-
-    if face_img_gray is not None:
-        img_path = f'./{PATHS["image_dir"]}/face_img_gray.jpg'
-        cv2.imwrite(img_path, face_img_gray)
-
-    captured_image = Image.fromarray(opencv_image)
-
-    photo_image = ImageTk.PhotoImage(image=captured_image)
-    label_widget.photo_image = photo_image
-    label_widget.configure(image=photo_image)
-    label_widget.after(10, camera_loop)
+    photo_image = ImageTk.PhotoImage(image=Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)))
+    label_camera.photo_image = photo_image
+    label_camera.configure(image=photo_image)
+    label_camera.after(10, camera_loop)
 
 if __name__ == '__main__':
     try:
         # Initialize
         create_directory(get_image_dir())
-        face_cascade = get_face_cascade()
-        if face_cascade.empty():
-            raise ValueError("Error loading cascade classifier")
             
         cam = initialize_camera(get_camera_index())
         if cam is None:
@@ -220,17 +287,23 @@ if __name__ == '__main__':
         logger.info(f"Initializing face capture")
         logger.info("Look at the camera and wait...")
         
-        app = Tk()
-        app.bind('<Escape>', lambda e: app.quit())
+        root = tk.Tk()
+        root.bind('<Escape>', lambda e: root.quit())
 
-        app.title("Universo UFPR")
+        root.title("Universo UFPR")
 
-        label_widget = Label(app)
-        label_widget.pack()
+        label_camera = ttk.Label(root)
+        label_camera.pack(side=LEFT, padx=10, pady=10)
+
+        btnCapturar = ttk.Button(root, text="Capturar", command=capture, bootstyle="success")
+        btnCapturar.pack(side=LEFT, padx=5, pady=10)
+
+        label_famous = ttk.Label(root, width=80)
+        label_famous.pack(side=LEFT, padx=10, pady=10)
 
         camera_loop()
 
-        app.mainloop()
+        root.mainloop()
         #camera_loop(cam)
 
         # while True:
