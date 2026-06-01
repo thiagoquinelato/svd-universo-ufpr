@@ -11,8 +11,10 @@ import logging
 import numpy as np
 
 import matplotlib.pyplot as plt
+import threading
+import queue
 
-from settings.settings import PATHS, CAMERA, FACE_DETECTION, EYE_DETECTION
+from settings.settings import PATHS, CAMERA, ACQUISITION, FACE_DETECTION, EYE_DETECTION, RECOGNITION
 
 
 # Configure logging
@@ -167,49 +169,98 @@ def detect_face_and_eyes(frame):
     dy = eyes[1][1] - eyes[0][1]
     angle = np.degrees(np.arctan2(dy, dx))
     logger.info(f"rotation angle: {angle:.2f} degrees")
+    if abs(angle) > FACE_DETECTION['max_rotation_angle']:
+        logger.warning(f"Rotation angle {angle:.2f} exceeds maximum allowed. Skipping frame.")
+        return None, None, None, None
     M = cv2.getRotationMatrix2D(center=rotation_center, angle=angle, scale=1)
     logger.info(f"Rotation matrix: {M}")
     frame = cv2.warpAffine(frame, M, (frame.shape[1], frame.shape[0]))
     gray = cv2.warpAffine(gray, M, (gray.shape[1], gray.shape[0]))
-    face_img = frame[face_y:face_y+face_h, face_x:face_x+face_w]
-    face_img_gray = gray[face_y:face_y+face_h, face_x:face_x+face_w]
+    min_point = tuple(a - b for a, b in zip(rotation_center, FACE_DETECTION['final_image_size']))
+    max_point = tuple(a + b for a, b in zip(rotation_center, FACE_DETECTION['final_image_size']))
+    logger.warning(f"Cropping to final image size: min_point={min_point}, max_point={max_point}")
+    if min_point[0] < 0 or min_point[1] < 0 or max_point[0] > frame.shape[1] or max_point[1] > frame.shape[0]:
+        logger.warning("Final crop exceeds image boundaries. Skipping frame.")
+        return None, None, None, None
+    face_img = frame[min_point[1]:max_point[1], min_point[0]:max_point[0]]
+    face_img_gray = gray[min_point[1]:max_point[1], min_point[0]:max_point[0]]
+    # face_img = frame[face_y:face_y+face_h, face_x:face_x+face_w]
+    # face_img_gray = gray[face_y:face_y+face_h, face_x:face_x+face_w]
 
     return frame, gray, face_img, face_img_gray
 
+images_to_process = queue.Queue(maxsize=ACQUISITION['images_to_capture'])
+processed_images = queue.Queue(maxsize=ACQUISITION['images_to_capture'])
+
+capture_phase = threading.Event()
+recognition_phase = threading.Event()
+
 capturing = False
-capturedFrame = None
+capturedFrames = None
 
-def detect():
-    global capturedFrame
-    frame = capturedFrame.copy() 
-    capturedFrame = None
+lock = threading.Lock()
 
-    frame, gray, face_img, face_img_gray = detect_face_and_eyes(frame)
+def process():
+    while True:
+        capture_phase.wait()
+        frame = images_to_process.get() 
 
-    global captureStep
-    if frame is None:
-        captureStep = 6
-    else: 
-        captureStep = 7
+        frame, gray, face_img, face_img_gray = detect_face_and_eyes(frame)
 
-    # if frame is not None:
-    #     img_path = f'./{PATHS["image_dir"]}/img.jpg'
-    #     cv2.imwrite(img_path, frame)
+        if frame is not None:
+            try:
+                processed_images.put(frame, block=False)
+                logger.warning(f"Enfileirou imagem para reconhecimento, fila atual: {processed_images.qsize()}")
+            except queue.Full as e:
+                logger.warning(f"Fila de reconhecimento cheia. Iniciando reconhecimento...")
+                capture_phase.clear()
+                with lock: # only one thread should trigger the recognition phase
+                    if processed_images.qsize() > 0 and not recognition_phase.is_set():
+                        recognition_phase.set()
+                        global captureStep
+                        captureStep = 6
+                        processed_images.join()  # Wait until all images have been processed
+                        # Mostra resultado
+                        captureStep = 7
 
-    # if gray is not None:
-    #     img_path = f'./{PATHS["image_dir"]}/img_gray.jpg'
-    #     cv2.imwrite(img_path, gray)
+        # if frame is not None:
+        #     img_path = f'./{PATHS["image_dir"]}/img.jpg'
+        #     cv2.imwrite(img_path, frame)
 
-    # if face_img is not None:
-    #     img_path = f'./{PATHS["image_dir"]}/face_img.jpg'
-    #     cv2.imwrite(img_path, face_img)
+        # if gray is not None:
+        #     img_path = f'./{PATHS["image_dir"]}/img_gray.jpg'
+        #     cv2.imwrite(img_path, gray)
 
-    if face_img_gray is not None:
-        img_path = f'./{PATHS["image_dir"]}/face_img_gray.jpg'
-        cv2.imwrite(img_path, face_img_gray)
+        # if face_img is not None:
+        #     img_path = f'./{PATHS["image_dir"]}/face_img.jpg'
+        #     cv2.imwrite(img_path, face_img)
+
+        if face_img_gray is not None:
+            img_path = f'./{PATHS["image_dir"]}/face_img_gray{processed_images.unfinished_tasks}.jpg'
+            cv2.imwrite(img_path, face_img_gray)
+
+        images_to_process.task_done()
+
+def recognition():
+    while True:
+        recognition_phase.wait()
+        try:
+            frame = processed_images.get(block=False)
+            logger.warning(f"Processando imagem, fila atual: {processed_images.qsize()}")
+            processed_images.task_done()
+        except queue.Empty:
+            logger.warning("Fila de reconhecimento vazia.")
+            recognition_phase.clear()
 
 
-def capture():
+recognition_threads = []
+for i in range(RECOGNITION['n_threads']):
+    t = threading.Thread(target=recognition, daemon=True)
+    recognition_threads.append(t)
+    t.start()
+
+
+def start_capture():
     global capturing, captureStep
     capturing = True
     captureStep = 0
@@ -223,6 +274,8 @@ def capture():
 def increase_capture_step():
     global captureStep
     captureStep += 1
+
+thread = threading.Thread(target=process, daemon=True).start()
 
 captureStep = 0
 def camera_loop():
@@ -245,16 +298,17 @@ def camera_loop():
         elif captureStep == 3:
             text = "Capturando..."
         elif captureStep == 4:
-            global capturedFrame
-            capturedFrame = frame.copy()
-            btnCapturar.after(10, detect)
             captureStep += 1
-            text = "Aguarde..."
+            capture_phase.set()
+            text = "Capturando..."
         elif captureStep == 5:
-            text = "Aguarde..."
+            try:
+                images_to_process.put(frame.copy(), block=False)
+            except queue.Full as e:
+                pass
+            text = "Capturando..."
         elif captureStep == 6:
-            text = "Tente novamente."
-            btnCapturar.config(state=NORMAL)
+            text = "Processando..."
         elif captureStep == 7:
             capturing = False
             captureStep = 0
@@ -295,7 +349,7 @@ if __name__ == '__main__':
         label_camera = ttk.Label(root)
         label_camera.pack(side=LEFT, padx=10, pady=10)
 
-        btnCapturar = ttk.Button(root, text="Capturar", command=capture, bootstyle="success")
+        btnCapturar = ttk.Button(root, text="Capturar", command=start_capture, bootstyle="success")
         btnCapturar.pack(side=LEFT, padx=5, pady=10)
 
         label_famous = ttk.Label(root, width=80)
