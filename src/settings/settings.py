@@ -9,9 +9,14 @@ PATHS = {
 }
 
 CAMERA = {
-    'width': 800,
-    'height': 600,
+    'width': 640,
+    'height': 480,
     'index': 0,
+}
+
+ACQUISITION = {
+    'images_to_capture': 100,
+    'n_threads': 4
 }
 
 FACE_DETECTION = {
@@ -20,6 +25,8 @@ FACE_DETECTION = {
     'min_size': (30, 30),
     'highlight_color': (255, 0, 0),
     'apply_highlight': False,
+    'max_rotation_angle': 20,  # Maximum allowed rotation angle in degrees
+    'final_image_size': (128, 128)
 }
 
 EYE_DETECTION = {
@@ -28,4 +35,8 @@ EYE_DETECTION = {
     'min_size': (10, 10),
     'highlight_color': (0, 255, 0),
     'apply_highlight': False,
+}
+
+RECOGNITION = {
+    'n_threads': 4
 }
