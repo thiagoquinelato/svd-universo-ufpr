@@ -6,3 +6,4 @@ matplotlib
 numpy
 kagglehub
 ttkbootstrap
+rarfile
